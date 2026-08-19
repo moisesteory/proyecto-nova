@@ -9,9 +9,9 @@ APP_NAME = "Separador de Música"
 
 
 def separate_audio(input_path: str, output_dir: str):
-    import soundfile as sf
     import torch
-    from demucs_infer import DemucsSeparator
+    from demucs_infer.api import Separator
+    from demucs_infer.audio import save_audio
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -19,25 +19,20 @@ def separate_audio(input_path: str, output_dir: str):
     song_dir.mkdir(parents=True, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    separator = DemucsSeparator(model="htdemucs", device=device)
-    _, stems = separator(input_path)
+    separator = Separator(model="htdemucs", device=device)
+    origin, separated = separator.separate_audio_file(input_path)
 
-    def to_numpy(wave):
-        data = wave.detach().cpu().numpy()
-        if data.ndim == 3:
-            data = data[0]
-        if data.ndim == 2:
-            data = data.T
-        return data
+    # demucs-infer returns the separated sources in the same structure as
+    # the original Demucs inference API: iterable of (filename, sources).
+    for filename, sources in separated:
+        vocals = sources["vocals"]
+        instrumental = sources["drums"] + sources["bass"] + sources["other"]
 
-    vocals = to_numpy(stems["vocals"])
-    instrumental = sum(to_numpy(stems[name]) for name in ("drums", "bass", "other"))
+        save_audio(vocals, song_dir / "Voz.wav", samplerate=separator.samplerate)
+        save_audio(instrumental, song_dir / "Instrumental.wav", samplerate=separator.samplerate)
+        return song_dir
 
-    # HTDemucs works at 44.1 kHz.
-    samplerate = 44100
-    sf.write(song_dir / "Voz.wav", vocals, samplerate, subtype="PCM_16")
-    sf.write(song_dir / "Instrumental.wav", instrumental, samplerate, subtype="PCM_16")
-    return song_dir
+    raise RuntimeError("El motor no devolvió pistas separadas.")
 
 
 class App:
