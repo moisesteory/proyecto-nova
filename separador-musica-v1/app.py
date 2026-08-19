@@ -6,45 +6,36 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "Separador de Música"
-SUPPORTED = (".mp3", ".wav", ".flac", ".m4a", ".ogg", ".aac")
 
 
 def separate_audio(input_path: str, output_dir: str):
-    import numpy as np
     import soundfile as sf
-    from demucs_infer import DemucsSeparator
+    import torch
+    from demucs_infer import DemucsSession
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     song_dir = out / Path(input_path).stem
     song_dir.mkdir(parents=True, exist_ok=True)
 
-    device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
-    separator = DemucsSeparator(model="htdemucs", device=device)
-    mixture, stems = separator(input_path)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    with DemucsSession(model="htdemucs", device=device) as session:
+        _, stems = session.infer(input_path)
+        samplerate = session.samplerate
 
-    vocals = stems["vocals"].detach().cpu().numpy()
-    if vocals.ndim == 3:
-        vocals = vocals[0]
-    mixture_np = mixture.detach().cpu().numpy()
-    if mixture_np.ndim == 3:
-        mixture_np = mixture_np[0]
+        def to_numpy(wave):
+            data = wave.detach().cpu().numpy()
+            if data.ndim == 3:
+                data = data[0]
+            if data.ndim == 2:
+                data = data.T
+            return data
 
-    instrumental = mixture_np - vocals
-    samplerate = 44100
+        vocals = to_numpy(stems["vocals"])
+        instrumental = sum(to_numpy(stems[name]) for name in ("drums", "bass", "other"))
 
-    # soundfile expects [samples, channels]
-    if vocals.ndim == 2:
-        vocals_out = vocals.T
-    else:
-        vocals_out = vocals
-    if instrumental.ndim == 2:
-        instrumental_out = instrumental.T
-    else:
-        instrumental_out = instrumental
-
-    sf.write(song_dir / "Voz.wav", vocals_out, samplerate, subtype="PCM_16")
-    sf.write(song_dir / "Instrumental.wav", instrumental_out, samplerate, subtype="PCM_16")
+    sf.write(song_dir / "Voz.wav", vocals, samplerate, subtype="PCM_16")
+    sf.write(song_dir / "Instrumental.wav", instrumental, samplerate, subtype="PCM_16")
     return song_dir
 
 
