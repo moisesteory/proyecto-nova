@@ -11,7 +11,7 @@ APP_NAME = "Separador de Música"
 def separate_audio(input_path: str, output_dir: str):
     import soundfile as sf
     import torch
-    from demucs_infer import DemucsSession
+    from demucs_infer import DemucsSeparator
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -19,21 +19,22 @@ def separate_audio(input_path: str, output_dir: str):
     song_dir.mkdir(parents=True, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    with DemucsSession(model="htdemucs", device=device) as session:
-        _, stems = session.infer(input_path)
-        samplerate = session.samplerate
+    separator = DemucsSeparator(model="htdemucs", device=device)
+    _, stems = separator(input_path)
 
-        def to_numpy(wave):
-            data = wave.detach().cpu().numpy()
-            if data.ndim == 3:
-                data = data[0]
-            if data.ndim == 2:
-                data = data.T
-            return data
+    def to_numpy(wave):
+        data = wave.detach().cpu().numpy()
+        if data.ndim == 3:
+            data = data[0]
+        if data.ndim == 2:
+            data = data.T
+        return data
 
-        vocals = to_numpy(stems["vocals"])
-        instrumental = sum(to_numpy(stems[name]) for name in ("drums", "bass", "other"))
+    vocals = to_numpy(stems["vocals"])
+    instrumental = sum(to_numpy(stems[name]) for name in ("drums", "bass", "other"))
 
+    # HTDemucs works at 44.1 kHz.
+    samplerate = 44100
     sf.write(song_dir / "Voz.wav", vocals, samplerate, subtype="PCM_16")
     sf.write(song_dir / "Instrumental.wav", instrumental, samplerate, subtype="PCM_16")
     return song_dir
@@ -74,7 +75,7 @@ class App:
     def select_file(self):
         path = filedialog.askopenfilename(
             title="Selecciona una canción",
-            filetypes=[("Audio", "*.mp3 *.wav *.flac *.m4a *.ogg *.aac"), ("Todos", "*.*")],
+            filetypes=[("Audio", "*.mp3 *.mpeg *.mp2 *.wav *.flac *.m4a *.ogg *.aac"), ("Todos", "*.*")],
         )
         if path:
             self.file_var.set(path)
